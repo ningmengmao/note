@@ -51,7 +51,15 @@
 
 5. return new DefaultSqlSessionFactory(config)
 
-mapper.xml里面有sql语句,相当于mapper接口下的方法的实现
+mapper.xml里面有sql语句,相当于mapper接口下的方法的实现, 一个select/update/insert/delete封装成**mappedStatement**
+
+statementHandler处理sql预编译,设置参数等相关工作, 依赖parameterHandler, resultSetHandler
+
+parameterHandler 设置预编译参数
+
+resultSetHandler    
+
+![](./img/2019-12-13 22-01-04屏幕截图.png)
 
 ---
 

@@ -16,7 +16,7 @@
 > >
 > > * JpaSpecificationExcecutor   复杂查询
 > >
-> >   > ![image-20191121205359000](/home/ningmeng/文档/java/img/image-20191121205359000.png)
+> >   > ![image-20191121205359000](./img/image-20191121205359000.png)
 > >
 > > ctrl+f12 类的全部方法
 > >

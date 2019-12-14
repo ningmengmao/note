@@ -1,5 +1,41 @@
 # Mybatis 学习笔记
 
+#### Mapper接口
+
+增删改可以有 int, long, boolean类型返回值, 使用sqlSession要commit
+
+* 参数处理
+
+  1. 单个参数
+
+     不做特殊处理, 直接传入
+
+  2. 多个参数
+
+     使用@Param("xx")标记mapper接口中的方法, 然后sql中使用#{xx}即可取值
+
+  3. POJO
+
+     直接#{属性名}取值
+
+  4. map
+
+     直接#{key}
+     
+  5. List, Set, array
+  
+     List: #{list[0]}
+  
+     Set: #{collection[0]}
+  
+     array: #{array[0]}
+  
+  6. TO
+  
+     类似record Page(int pageNum, int size, ArrayList<T>) {}
+
+
+
 #### mapper.xml
 
 * 获取主键自增值 
@@ -67,7 +103,7 @@
   >  ```xml
   >   <association property="tag" javaType="" select="" column="">
   >   <collection property="tagSet" ofType="" select="" column="">
-  >   ```
+  >  ```
   > 
   >  
   > 
