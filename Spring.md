@@ -800,6 +800,63 @@ public interface JoinPoint {
 
 #### 事务
 
+- 默认回滚运行时异常(RuntimeException及其子类, Error实例也会回滚)
+- 不会滚编译时异常 (方法上声明了的异常或try/catch了的异常)
+
+![](./img/tx.jpg)
+
+##### 并发带来的问题 
+
+假设有两个事务A, B并发执行
+
+1. 脏读   (读了其他事务未提交的数据)    **不能发生**
+   * A将某条记录的age从20修改为30
+   * B读取到A修改后的数据30
+   * A发生异常, 将30回滚为20
+   * 这时B读到的30就是无效值
+2. 幻读   (多读了或少读了一些数据)
+   * A读取了表的一部分数据
+   * B向表中插入了新的行
+   * A再次读取表时多出了一些行
+3. 不可重复读  (读取数据时, 其他事务修改了数据)
+   * A读取了age的值为20
+   * B将age的值修改为30
+   * A再次读取age的值为30, 和第一次读取不一致
+
+##### 事务的隔离级别
+
+![](./img/1646034-20190430095830286-1397235000.png)
+
+1. 读未提交  
+
+2. 读已提交
+
+   A只能读B事务已经提交了了数据
+
+3. 可重复读
+
+   同一事务多次读取时读取的数据一致.  即A执行期间禁止其他事务对数据更新
+
+4. 串行化
+
+   一张表同时只有一个事务执行
+
+
+
+##### 传播规则
+
+在一个事务中调用其他事务方法
+
+事务A调用事务B
+
+1. REQUIRED    必须存在一个事务, 如果当前存在一个事务, 则加入该事务, 否则新建一个事务 (使用较多)
+2. SUPPORT      支持当前事务, 如果当前存在事务, 则使用事务, 否则不使用事务运行
+3. MANDATORY         必须存在事务, 如果当前存在事务, 则使用事务, 否则抛出`IllegalTransactionStateException`
+4. REQUIRE_NEW    无论是否存在一个事务, 都会开启一个**新的事务**  (使用较多)
+5. NOT_SUPPORT   以非事务方式执行, 如果当前存在事务, 把当前事务挂起(暂停)
+6. NEVER        不支持事务, 如果存在事务则抛出异常
+7. NESTED     寄生事务, 如果当前存在事务, 则在内部事务执行, 如果当前不存在事务,则创建一个事务
+
 
 
 ##### PlatformTransactionManager
@@ -827,19 +884,7 @@ public interface PlatformTransactionManager extends TransactionManager {
 
 ![](./img/2019-12-19--11:50:51.png)
 
-**传播规则**
 
-在一个事务中调用其他事务方法
-
-事务A调用事务B
-
-1. REQUIRED    必须存在一个事务, 如果当前存在一个事务, 则加入该事务, 否则新建一个事务 (使用较多)
-2. SUPPORT      支持当前事务, 如果当前存在事务, 则使用事务, 否则不使用事务运行
-3. MANDATORY         必须存在事务, 如果当前存在事务, 则使用事务, 否则抛出`IllegalTransactionStateException`
-4. REQUIRE_NEW    无论是否存在一个事务, 都会开启一个**新的事务**  (使用较多)
-5. NOT_SUPPORT   以非事务方式执行, 如果当前存在事务, 把当前事务挂起(暂停)
-6. NEVER        不支持事务, 如果存在事务则抛出异常
-7. NESTED     寄生事务, 如果当前存在事务, 则在内部事务执行, 如果当前不存在事务,则创建一个事务
 
 ##### TransactionStatus
 
@@ -848,6 +893,37 @@ public interface PlatformTransactionManager extends TransactionManager {
 
 
 ##### @Transactional
+
+###### 开启事务设置
+
+```java
+
+@EnableTransactionManagement
+@Configuration
+public class AppConfig {
+    
+}
+```
+
+
+
+###### 默认设置
+
+- 传播规则是`REQUIRED.`
+- 隔离 level 是`DEFAULT.`
+- transaction 是 read-write。
+- transaction 超时默认为基础 transaction 系统的默认超时，如果不支持超时，则默认为 none。
+- 任何`RuntimeException`触发回滚，任何已检查的`Exception`都没有。
+
+| 属性              | 需要 | 默认                                                         | 描述                                                         |
+| :---------------- | :--- | :----------------------------------------------------------- | :----------------------------------------------------------- |
+| `name`            | 是   | 与 transaction 属性关联的方法名称。通配符(*)字符可用于将相同的 transaction 属性设置与多个方法相关联(对于 example，`get`，`handle`，`onEvent`等)。 |                                                              |
+| `propagation`     | 没有 | `REQUIRED`                                                   | Transaction 传播行为。                                       |
+| `isolation`       | 没有 | `DEFAULT`                                                    | Transaction isolation level。仅适用于`REQUIRED`或`REQUIRES_NEW`的传播设置。 |
+| `timeout`         | 没有 | -1                                                           | Transaction timeout(秒)。仅适用于传播`REQUIRED`或`REQUIRES_NEW`。 |
+| `read-only`       | 没有 | 假                                                           | Read-write 与 read-only transaction。仅适用于`REQUIRED`或`REQUIRES_NEW`。 |
+| `rollback-for`    | 没有 | Comma-delimited 触发回滚的`Exception`实例列表。对于 example，`com.foo.MyBusinessException,ServletException.` |                                                              |
+| `no-rollback-for` | 没有 | Comma-delimited 不触发回滚的`Exception`实例列表。对于 example，`com.foo.MyBusinessException,ServletException.` |                                                              |
 
 ```java
 @Target({ElementType.TYPE, ElementType.METHOD})
@@ -881,9 +957,440 @@ public @interface Transactional {
 }
 ```
 
+###### 细节
+
+在代理模式(默认设置)下，只拦截通过代理进入的外部方法 calls。这意味着 self-invocation(实际上，目标 object 中的一个方法调用目标 object 的另一个方法)在运行时不会导致实际的 transaction，即使被调用的方法用`@Transactional`标记。此外，必须完全初始化代理以提供预期的行为，因此您不应该在初始化 code(即`@PostConstruct`)中依赖此 feature  (使用cglib做AOP实现)
+
+处理`@Transactional` annotations 的默认建议模式是`proxy`，它允许仅通过代理拦截 calls。同一 class 中的本地 calls 不能以这种方式截获。对于更高级的拦截模式，请考虑结合 compile-time 或 load-time 编织切换到`aspectj`模式。
+
+`proxy-target-class`属性控制为使用`@Transactional` annotation 注释的 classes 创建的 transactional 代理类型。如果`proxy-target-class`设置为`true`，则会创建 class-based 个代理。如果`proxy-target-class`是`false`或者省略了该属性，则会创建标准 JDK interface-based 代理。
+
 ---
 
+#### DAO
 
+![异常层次结构](./img/DataAccessException.png)
+
+| Action                                                   | Spring | You  |
+| :------------------------------------------------------- | :----: | :--: |
+| Define connection parameters.                            |        |  Y   |
+| Open the connection.                                     |   Y    |      |
+| Specify the SQL statement.                               |        |  Y   |
+| Declare parameters and provide parameter values          |        |  Y   |
+| Prepare and execute the statement.                       |   Y    |      |
+| Set up the loop to iterate through the results (if any). |   Y    |      |
+| Do the work for each iteration.                          |        |  Y   |
+| Process any exception.                                   |   Y    |      |
+| Handle transactions.                                     |   Y    |      |
+| Close the connection, the statement, and the resultset.  |   Y    |      |
+
+##### JDBC实现
+
+您可以选择几种方法来构成JDBC数据库访问的基础。除了`JdbcTemplate`，一种新的`SimpleJdbcInsert`和 `SimpleJdbcCall`方法还优化了数据库元数据，并且RDBMS Object样式采用了一种更加面向对象的方法，类似于JDO Query设计。一旦开始使用这些方法之一，您仍然可以混合搭配以包含来自其他方法的功能。所有方法都需要兼容JDBC 2.0的驱动程序，某些高级功能需要JDBC 3.0驱动程序。
+
+- `JdbcTemplate`是经典且最受欢迎的Spring JDBC方法。这种“最低级别”的方法以及其他所有方法都在后台使用了JdbcTemplate。
+- `NamedParameterJdbcTemplate`包装`JdbcTemplate`以提供命名参数，而不是传统的JDBC `?`占位符。当您有多个SQL语句参数时，此方法可提供更好的文档记录并易于使用。
+- `SimpleJdbcInsert`并`SimpleJdbcCall`优化数据库元数据以限制必要的配置量。这种方法简化了编码，因此您只需要提供表或过程的名称，并提供与列名称匹配的参数映射即可。仅当数据库提供足够的元数据时，此方法才有效。如果数据库不提供此元数据，则必须提供参数的显式配置。
+- RDBMS对象包括`MappingSqlQuery`，`SqlUpdate`和`StoredProcedure`，你需要你的数据访问层的初始化过程中创建可重用的，线程安全的对象。此方法以JDO Query为模型，其中您定义查询字符串，声明参数并编译查询。完成后，可以使用各种参数值多次调用execute方法。
+
+
+
+##### JdbcTemplate
+
+- 运行SQL查询
+- 更新语句和存储过程调用
+- 对`ResultSet`实例执行迭代并提取返回的参数值。
+- 捕获JDBC异常并将其转换为`org.springframework.dao`包中定义的通用的，信息量更大的异常层次结构
+
+###### 查询Domain
+
+```java
+Actor actor = this.jdbcTemplate.queryForObject(
+        "select first_name, last_name from t_actor where id = ?",
+        new Object[]{1212L},
+        new RowMapper<Actor>() {
+            public Actor mapRow(ResultSet rs, int rowNum) throws SQLException {
+                Actor actor = new Actor();
+                actor.setFirstName(rs.getString("first_name"));
+                actor.setLastName(rs.getString("last_name"));
+                return actor;
+            }
+        });
+```
+
+###### 查询多个Domain
+
+```java
+List<Actor> actors = this.jdbcTemplate.query(
+        "select first_name, last_name from t_actor",
+        new RowMapper<Actor>() {
+            public Actor mapRow(ResultSet rs, int rowNum) throws SQLException {
+                Actor actor = new Actor();
+                actor.setFirstName(rs.getString("first_name"));
+                actor.setLastName(rs.getString("last_name"));
+                return actor;
+            }
+        });
+```
+
+可以提取通用的`RowMapper`
+
+```java
+public List<Actor> findAllActors() {
+    return this.jdbcTemplate.query( "select first_name, last_name from t_actor", new ActorMapper());
+}
+
+private static final class ActorMapper implements RowMapper<Actor> {
+    public Actor mapRow(ResultSet rs, int rowNum) throws SQLException {
+        Actor actor = new Actor();
+        actor.setFirstName(rs.getString("first_name"));
+        actor.setLastName(rs.getString("last_name"));
+        return actor;
+    }
+}
+```
+
+
+
+##### NamedParameterJdbcTemplate
+
+`NamedParameterJdbcTemplate` 类 通过使用命名参数添加了对 JDBC statements 编程的支持，而不是仅使用经典占位符(`'?'`)arguments 编写 JDBC statements。 `NamedParameterJdbcTemplate` class 包装`JdbcTemplate`并委托包装的`JdbcTemplate`来完成它的大部分工作。
+
+使用 `:keyword`来占位, 如`String sql = "select count(*) from T_ACTOR where first_name = :firstName and last_name = :lastName";`
+
+##### 得到生成的主键
+
+```java
+final String INSERT_SQL = "insert into my_test (name) values(?)";
+final String name = "Rob";
+
+KeyHolder keyHolder = new GeneratedKeyHolder();
+jdbcTemplate.update(
+    new PreparedStatementCreator() {
+        public PreparedStatement createPreparedStatement(Connection connection) throws SQLException {
+            PreparedStatement ps = connection.prepareStatement(INSERT_SQL, new String[] {"id"});
+            ps.setString(1, name);
+            return ps;
+        }
+    },
+    keyHolder);
+```
+
+##### 批处理
+
+实现特殊接口`BatchPreparedStatementSetter`的两个方法，并将 implementation 作为`batchUpdate`方法调用中的第二个参数传递来完成`JdbcTemplate`批处理
+
+```java
+    public int[] batchUpdate(final List<Actor> actors) {
+        return this.jdbcTemplate.batchUpdate(
+                "update t_actor set first_name = ?, last_name = ? where id = ?",
+                new BatchPreparedStatementSetter() {
+                    public void setValues(PreparedStatement ps, int i) throws SQLException {
+                        Actor actor = actors.get(i);
+                        ps.setString(1, actor.getFirstName());
+                        ps.setString(2, actor.getLastName());
+                        ps.setLong(3, actor.getId().longValue());
+                    }
+                    public int getBatchSize() {
+                        return actors.size();
+                    }
+                });
+    }
+```
+
+如果您处理更新流或从文件读取，则可能具有首选批量大小，但最后一批可能没有该数量的条目。在这种情况下，您可以使用`InterruptibleBatchPreparedStatementSetter`接口，该接口允许您在输入源耗尽时中断批处理。 `isBatchExhausted`方法允许您发出批次结束的信号
+
+---
+
+#### 任务执行和调度
+
+Spring Framework 分别为`TaskExecutor`和`TaskScheduler`接口提供异步执行和任务调度的抽象。
+
+##### TaskExecutor
+
+```java
+@FunctionalInterface
+public interface TaskExecutor extends Executor {
+
+	@Override
+	void execute(Runnable task);
+}
+
+```
+
+###### 实现
+
+- `SyncTaskExecutor`：此实现不会异步执行调用。相反，每次调用都发生在调用同一线程中。它主要用于不需要 多线程的情况，例如在简单的测试用例中。
+- `SimpleAsyncTaskExecutor`：此实现不会重用任何线程。相反，它为每次调用启动一个新线程。但是，它确实支持并发限制，该限制会阻止任何超出限制的调用，直到释放一个插槽。如果您正在寻找 真正的线程池，请参阅此列表中的`ThreadPoolTaskExecutor`。
+- `ConcurrentTaskExecutor`：此实现是`java.util.concurrent.Executor`实例的适配器。有一个替代(`ThreadPoolTaskExecutor`)将`Executor` configuration 参数公开为 bean properties。很少需要直接使用`ConcurrentTaskExecutor`。但是，如果`ThreadPoolTaskExecutor`不够灵活以满足您的需求，`ConcurrentTaskExecutor`是另一种选择。
+- `ThreadPoolTaskExecutor`：此实现最常用。它公开 bean properties 以配置`java.util.concurrent.ThreadPoolExecutor`并将其包装在`TaskExecutor`中。如果您需要适应不同类型的`java.util.concurrent.Executor`，我们建议您改用`ConcurrentTaskExecutor`。
+- `WorkManagerTaskExecutor`：此实现使用 CommonJ `WorkManager`作为其后备服务提供程序，并且是在 Spring application context 中在 WebLogic 或 WebSphere 上设置 CommonJ-based 线程池 integration 的中心便捷 class。
+- `DefaultManagedTaskExecutor`：此实现在 JSR-236 兼容的运行时环境(例如 Java EE 7 application 服务器)中使用 JNDI-obtained `ManagedExecutorService`，为此目的替换 CommonJ WorkManager。
+
+###### ThreadPoolTaskExecutor
+
+1. 配置
+
+   * corePoolSize: 核心线程数，核心线程会一直存活，即使没有任务需要处理.
+
+   * maxPoolSize: 线程池中允许的最大线程数, 当线程数大于或等于核心线程，且任务队列已满时，线程池会创建新的线程，直到线程数量达到maxPoolSize。
+
+   * queueCapacity: 任务队列容量。
+
+2. 线程池按以下行为执行任务
+
+   * 当线程数小于核心线程数时，创建线程。
+
+   * 当线程数大于等于核心线程数，且任务队列未满时，将任务放入任务队列。
+
+   * 当线程数大于等于核心线程数，且任务队列已满
+     * 若线程数小于最大线程数，创建线程
+     * 若线程数等于最大线程数，抛出异常，拒绝任务
+3. 
+
+
+
+##### TaskScheduler
+
+在某个时刻调度任务
+
+```java
+public interface TaskScheduler {
+
+    ScheduledFuture schedule(Runnable task, Trigger trigger);
+
+    ScheduledFuture schedule(Runnable task, Instant startTime);
+
+    ScheduledFuture schedule(Runnable task, Date startTime);
+
+    ScheduledFuture scheduleAtFixedRate(Runnable task, Instant startTime, Duration period);
+
+    ScheduledFuture scheduleAtFixedRate(Runnable task, Date startTime, long period);
+
+    ScheduledFuture scheduleAtFixedRate(Runnable task, Duration period);
+
+    ScheduledFuture scheduleAtFixedRate(Runnable task, long period);
+
+    ScheduledFuture scheduleWithFixedDelay(Runnable task, Instant startTime, Duration delay);
+
+    ScheduledFuture scheduleWithFixedDelay(Runnable task, Date startTime, long delay);
+
+    ScheduledFuture scheduleWithFixedDelay(Runnable task, Duration delay);
+
+    ScheduledFuture scheduleWithFixedDelay(Runnable task, long delay);
+}
+```
+
+fixed-rate 和 fixed-delay 方法用于简单的定期执行，但接受Trigger的方法更灵活。
+
+###### Trigger
+
+`Trigger`的基本思想是执行时间可以根据过去的执行结果甚至任意条件来确定。如果这些确定确实考虑了前面执行的结果，则该信息在`TriggerContext`内可用。    
+
+```java
+public interface Trigger {
+    Date nextExecutionTime(TriggerContext triggerContext);
+}
+
+public interface TriggerContext {
+	// 上次定时时间
+    Date lastScheduledExecutionTime();
+	// 上次实际执行时间
+    Date lastActualExecutionTime();
+	// 上次完成时间
+    Date lastCompletionTime();
+}
+```
+
+###### 注解
+
+1. 启用Scheduler
+
+   ```java
+   @Configuration
+   @EnableAsync
+   @EnableScheduling
+   public class AppConfig {
+   }
+   ```
+
+2. @Scheduled
+
+   ```java
+   @Scheduled(fixedDelay=50000)
+   public void donSomething() {
+       // ...
+   }
+   ```
+
+   ```java
+   @Target({ElementType.METHOD, ElementType.ANNOTATION_TYPE})
+   @Retention(RetentionPolicy.RUNTIME)
+   @Documented
+   @Repeatable(Schedules.class)
+   public @interface Scheduled {
+   
+   	String CRON_DISABLED = ScheduledTaskRegistrar.CRON_DISABLED;
+   
+   	/**
+   	 * A cron-like expression, extending the usual UN*X definition to include triggers
+   	 * on the second, minute, hour, day of month, month, and day of week.
+   	 * <p>For example, {@code "0 * * * * MON-FRI"} means once per minute on weekdays
+   	 * (at the top of the minute - the 0th second).
+   	 * <p>The fields read from left to right are interpreted as follows.
+   	 * <ul>
+   	 * <li>second</li>
+   	 * <li>minute</li>
+   	 * <li>hour</li>
+   	 * <li>day of month</li>
+   	 * <li>month</li>
+   	 * <li>day of week</li>
+   	 * </ul>
+   	 * <p>The special value {@link #CRON_DISABLED "-"} indicates a disabled cron
+   	 * trigger, primarily meant for externally specified values resolved by a
+   	 * <code>${...}</code> placeholder.
+   	 * @return an expression that can be parsed to a cron schedule
+   	 * @see org.springframework.scheduling.support.CronSequenceGenerator
+   	 */
+   	String cron() default "";
+   
+   	String zone() default "";
+   
+   	long fixedDelay() default -1;
+   
+   	String fixedDelayString() default "";
+   
+   	long fixedRate() default -1;
+   
+   	String fixedRateString() default "";
+   
+   	long initialDelay() default -1;
+   
+   	String initialDelayString() default "";
+   
+   }
+   
+   ```
+
+3. @Async
+
+   异步调用方法, 调用者在调用时立即返回，而方法的实际执行发生在已提交给 Spring `TaskExecutor`的任务中。
+
+   支持的返回类型为 : `java.util.concurrent.Future` , `java.util.concurrent.CompletableFuture`, `org.springframework.util.concurrent.ListenableFuture`
+
+   不能将`@Async`与生命周期回调(如`@PostConstruct`)结合使用。
+
+   ```java
+   public class SampleBeanImpl implements SampleBean {
+   
+       @Async
+       void doSomething() {
+           // ...
+       }
+   }
+   public class SampleBeanInitializer {
+       private final SampleBean bean;
+       public SampleBeanInitializer(SampleBean bean) {
+           this.bean = bean;
+       }
+       
+       @PostConstruct
+       public void initialize() {
+           bean.doSomething();
+       }
+   }
+   ```
+
+---
+
+#### Cache
+
+- `@Cacheable`：触发缓存填充。
+
+- `@CacheEvict`：触发缓存清除。
+
+- `@CachePut`：更新缓存。
+
+  一定会执行方法
+
+- `@Caching`：重新组合要在方法上应用的多个缓存操作。
+
+- `@CacheConfig`：在 class-level 分享一些 common cache-related 设置。
+
+##### 启用Cache
+
+```java
+@Configuration
+@EnableCaching
+public class AppConfig {
+}
+```
+
+##### @Cacheable
+
+```java
+@Cacheable(cacheNames="books", key="#isbn", cacheManager="anotherCacheManager")
+public Book findBook(ISBN isbn, boolean checkWarehouse, boolean includeUsed)
+
+@Cacheable(cacheNames="books", key="#isbn.rawNumber", cacheManager="anotherCacheManager")
+public Book findBook(ISBN isbn, boolean checkWarehouse, boolean includeUsed)
+
+@Cacheable(cacheNames="books", key="T(someType).hash(#isbn)", cacheManager="anotherCacheManager")
+public Book findBook(ISBN isbn, boolean checkWarehouse, boolean includeUsed)
+
+@Cacheable(cacheNames="books", keyGenerator="myKeyGenerator", cacheManager="anotherCacheManager")
+public Book findBook(ISBN isbn, boolean checkWarehouse, boolean includeUsed)
+```
+
+```java
+@Target({ElementType.TYPE, ElementType.METHOD})
+@Retention(RetentionPolicy.RUNTIME)
+@Inherited
+@Documented
+public @interface Cacheable {
+
+	@AliasFor("cacheNames")
+	String[] value() default {};
+
+	@AliasFor("value")
+	String[] cacheNames() default {};
+
+	String key() default "";
+
+	String keyGenerator() default "";
+
+	String cacheManager() default "";
+
+	String cacheResolver() default "";
+
+	String condition() default "";
+
+	String unless() default "";
+
+    // 防止缓存雪崩
+	boolean sync() default false;
+
+}
+```
+
+
+
+SpEL
+
+| 名称          | 地点               | 描述                                                         | 例                                                           |
+| :------------ | :----------------- | :----------------------------------------------------------- | :----------------------------------------------------------- |
+| `methodName`  | Root object        | 要调用的方法的 name                                          | `#root.methodName`                                           |
+| `method`      | Root object        | 正在调用的方法                                               | `#root.method.name`                                          |
+| `target`      | Root object        | 正在调用目标 object                                          | `#root.target`                                               |
+| `targetClass` | Root object        | 正在调用的目标的 class                                       | `#root.targetClass`                                          |
+| `args`        | Root object        | arguments(as array)用于调用目标                              | `#root.args[0]`                                              |
+| `caches`      | Root object        | 执行当前方法的高速缓存的集合                                 | `#root.caches[0].name`                                       |
+| 参数 name     | Evaluation context | 任何方法 arguments 的 Name。如果名称不可用(可能由于没有调试信息)，参数名称也可以在`#a<#arg>`下获得，其中`#arg`代表参数索引(从`0`开始)。 | `#iban`或`#a0`(您也可以使用`#p0`或`#p<#arg>`表示法作为别名)。 |
+| `result`      | Evaluation context | 方法调用的结果(要缓存的 value)。仅在`unless`表达式，`cache put`表达式(用于计算`key`)或`cache evict`表达式(当`beforeInvocation`为`false`时)中可用。对于受支持的包装器(例如`Optional`)，`#result`指的是实际的 object，而不是 wrapper。 | `#result`                                                    |
+
+
+
+---
 
 #### 其他知识
 
@@ -900,21 +1407,21 @@ public @interface Transactional {
 使用泛型基类解决代码复用
 
 ```java
-public class BaseService<T> {
+public abstract class BaseService<T> {
     
     @Autowired
     protocal BaseDao baseDao;
     
     public boolean save(T t){
-        return baseDao.save(t);
+        return baseDao.insert(t);
     }
     
     public boolean delete(T t){
         return baseDao.delete(t);
     }
     
-    public int add(T t){
-        return baseDao.insert(t);
+    public boolean update(T t){
+        return baseDao.update(t);
     }
     
     public T findById(int id){
@@ -922,9 +1429,9 @@ public class BaseService<T> {
     }
 }
 
-public class BaseDao<T> {
+public abstract class BaseDao<T> {
     
-    public boolean save(T t){
+    public int insert(T t){
         // ...
     }
     
@@ -932,7 +1439,7 @@ public class BaseDao<T> {
         // ...
     }
     
-    public int add(T t){
+    public boolean update(T t){
         //...
     }
     

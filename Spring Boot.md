@@ -28,6 +28,12 @@
 > >
 > > 或在application.yml 中使用 spring.profiles: dev 配置一个spring环境
 > >
+> > 无法使用 `@PropertySource` 注解加载 YAML 文件。
+> >
+> > ```
+> > @ConfigurationProperties(prefix="acme")
+> > ```
+> >
 > > > ```yml
 > > > spring:
 > > >   profiles:
@@ -44,7 +50,7 @@
 > > >   profiles: prod
 > > > ```
 > > >
-> > 
+> >
 
 #### 4. 日志
 

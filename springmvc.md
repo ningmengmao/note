@@ -656,3 +656,405 @@ public class WebConfig implements WebMvcConfigurer {
     }
 }
 ```
+
+
+
+---
+
+#### 进阶
+
+##### FrameworkServlet
+
+`public abstract class FrameworkServlet extends HttpServletBean implements ApplicationContextAware`
+
+![](img/springmvc/20190329171506955.png)
+
+使用模板方法,在doGet,doPost等方法调用抽象的doService(由子类实现)
+
+##### DispatcherServlet
+
+`public class DispatcherServlet extends FrameworkServlet`
+
+实现了FrameworkServlet的doService方法
+
+###### doDispatch
+
+```java
+/**
+	 * Process the actual dispatching to the handler.
+	 * <p>The handler will be obtained by applying the servlet's HandlerMappings in order.
+	 * The HandlerAdapter will be obtained by querying the servlet's installed HandlerAdapters
+	 * to find the first that supports the handler class.
+	 * <p>All HTTP methods are handled by this method. It's up to HandlerAdapters or handlers
+	 * themselves to decide which methods are acceptable.
+	 * @param request current HTTP request
+	 * @param response current HTTP response
+	 * @throws Exception in case of any kind of processing failure
+	 */
+	protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+		HttpServletRequest processedRequest = request;
+		HandlerExecutionChain mappedHandler = null;
+		boolean multipartRequestParsed = false;
+
+		WebAsyncManager asyncManager = WebAsyncUtils.getAsyncManager(request);
+
+		try {
+			ModelAndView mv = null;
+			Exception dispatchException = null;
+
+			try {
+				processedRequest = checkMultipart(request);
+				multipartRequestParsed = (processedRequest != request);
+
+				// 确定当前request的Handler。
+				mappedHandler = getHandler(processedRequest);
+				if (mappedHandler == null) {
+					noHandlerFound(processedRequest, response);
+					return;
+				}
+
+				// 确定当前request的HandlerAdapter。
+				HandlerAdapter ha = getHandlerAdapter(mappedHandler.getHandler());
+
+				// Process last-modified header, if supported by the handler.
+				String method = request.getMethod();
+				boolean isGet = "GET".equals(method);
+				if (isGet || "HEAD".equals(method)) {
+					long lastModified = ha.getLastModified(request, mappedHandler.getHandler());
+					if (new ServletWebRequest(request, response).checkNotModified(lastModified) && isGet) {
+						return;
+					}
+				}
+
+                // 调用HandlerInterceptor.preHandle
+				if (!mappedHandler.applyPreHandle(processedRequest, response)) {
+					return;
+				}
+
+                // handlerAdapter.handler
+				// Actually invoke the handler.
+				mv = ha.handle(processedRequest, response, mappedHandler.getHandler());
+
+				if (asyncManager.isConcurrentHandlingStarted()) {
+					return;
+				}
+
+				applyDefaultViewName(processedRequest, mv);
+				mappedHandler.applyPostHandle(processedRequest, response, mv);
+			}
+			catch (Exception ex) {
+				dispatchException = ex;
+			}
+			catch (Throwable err) {
+				// As of 4.3, we're processing Errors thrown from handler methods as well,
+				// making them available for @ExceptionHandler methods and other scenarios.
+				dispatchException = new NestedServletException("Handler dispatch failed", err);
+			}
+			processDispatchResult(processedRequest, response, mappedHandler, mv, dispatchException);
+		}
+		catch (Exception ex) {
+			triggerAfterCompletion(processedRequest, response, mappedHandler, ex);
+		}
+		catch (Throwable err) {
+			triggerAfterCompletion(processedRequest, response, mappedHandler,
+					new NestedServletException("Handler processing failed", err));
+		}
+		finally {
+			if (asyncManager.isConcurrentHandlingStarted()) {
+				// Instead of postHandle and afterCompletion
+				if (mappedHandler != null) {
+					mappedHandler.applyAfterConcurrentHandlingStarted(processedRequest, response);
+				}
+			}
+			else {
+				// Clean up any resources used by a multipart request.
+				if (multipartRequestParsed) {
+					cleanupMultipart(processedRequest);
+				}
+			}
+		}
+	}
+```
+
+
+
+`mappedHandler = getHandler(processedRequest);`
+
+```java
+	@Nullable
+	protected HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception {
+		if (this.handlerMappings != null) {
+			for (HandlerMapping mapping : this.handlerMappings) {
+				HandlerExecutionChain handler = mapping.getHandler(request);
+				if (handler != null) {
+					return handler;
+				}
+			}
+		}
+```
+
+`RequestMappingHandlerMapping.mappingRegistry.mappingLookUp`包含了所有的Controller的Method映射
+
+###### HandlerExecutionChain
+
+```java
+	private final Object handler;
+
+	@Nullable
+	private HandlerInterceptor[] interceptors;
+
+	// 拦截器
+	@Nullable
+	private List<HandlerInterceptor> interceptorList;
+```
+
+
+
+##### HandlerInterceptor
+
+```java
+public interface HandlerInterceptor {
+
+	default boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
+			throws Exception {
+
+		return true;
+	}
+
+    /**
+    * 对于@ResponseBody和ResponseEntity来说这个方法用处不大, 响应是在HandlerAdapter内在postHandler之前   处理的, 这意味者对响应进行任何更改都为时过晚. 对于这种情况, 可以实现ResponseBodyAdvice, 并将其声明为ControllerAdvice或者在RequestMappingHandlerAdapter上直接配置
+    */
+	default void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler,
+			@Nullable ModelAndView modelAndView) throws Exception {
+	}
+
+	default void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
+			@Nullable Exception ex) throws Exception {
+	}
+}
+```
+
+
+
+##### HandlerInterceptorAdapter
+
+```java
+public abstract class HandlerInterceptorAdapter implements AsyncHandlerInterceptor {
+
+	/**
+	 * This implementation always returns {@code true}.
+	 */
+	@Override
+	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
+			throws Exception {
+
+		return true;
+	}
+
+	/**
+	 * This implementation is empty.
+	 */
+	@Override
+	public void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler,
+			@Nullable ModelAndView modelAndView) throws Exception {
+	}
+
+	/**
+	 * This implementation is empty.
+	 */
+	@Override
+	public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
+			@Nullable Exception ex) throws Exception {
+	}
+
+	/**
+	 * This implementation is empty.
+	 */
+	@Override
+	public void afterConcurrentHandlingStarted(HttpServletRequest request, HttpServletResponse response,
+			Object handler) throws Exception {
+	}
+
+}
+```
+
+
+
+##### HandlerMapping
+
+```java
+/**
+* Interface to be implemented by objects that define a mapping between requests and handler objects.
+*
+*This class can be implemented by application developers, although this is not
+* necessary, as link org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping
+* and link org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+* are included in the framework. The former is the default if no
+* HandlerMapping bean is registered in the application context.
+*/
+public interface HandlerMapping {
+    // field
+    
+    public HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception;
+}
+
+```
+
+##### HandlerMethod
+
+```java
+/**
+ * Encapsulates(封装) information about a handler method consisting of a
+ * {@linkplain #getMethod() method} and a {@linkplain #getBean() bean}.
+ * Provides convenient access to method parameters, the method return value,
+ * method annotations, etc.
+ *
+ * The class may be created with a bean instance or with a bean name
+ * (e.g. lazy-init bean, prototype bean). Use {@link #createWithResolvedBean()}
+ * to obtain a {@code HandlerMethod} instance with a bean instance resolved
+ * through the associated {@link BeanFactory}.
+ */
+public class HandlerMethod {
+    	private final Object bean;
+
+	@Nullable
+	private final BeanFactory beanFactory;
+
+	private final Class<?> beanType;
+
+	private final Method method;
+
+	private final Method bridgedMethod;
+
+	private final MethodParameter[] parameters;
+
+	@Nullable
+	private HttpStatus responseStatus;
+
+	@Nullable
+	private String responseStatusReason;
+
+	@Nullable
+	private HandlerMethod resolvedFromHandlerMethod;
+
+	@Nullable
+	private volatile List<Annotation[][]> interfaceParameterAnnotations;
+
+	private final String description;
+}
+```
+
+Controller方法的封装
+
+通过getMethod().invoke(getBean(), methodParamter)执行Controller方法(基于反射)  
+
+###### 属性
+
+1. bean
+2. bridgeMethod
+
+##### HandlerAdapter
+
+```java
+/**
+ * MVC framework SPI, allowing parameterization of the core MVC workflow.
+ *
+ * <p>Interface that must be implemented for each handler type to handle a request.
+ * This interface is used to allow the {@link DispatcherServlet} to be indefinitely
+ * extensible. The {@code DispatcherServlet} accesses all installed handlers through
+ * this interface, meaning that it does not contain code specific to any handler type.
+ *
+ * <p>Note that a handler can be of type {@code Object}. This is to enable
+ * handlers from other frameworks to be integrated with this framework without
+ * custom coding, as well as to allow for annotation-driven handler objects that
+ * do not obey any specific Java interface.
+ *
+ * <p>This interface is not intended for application developers. It is available
+ * to handlers who want to develop their own web workflow.
+ *
+ * <p>Note: {@code HandlerAdapter} implementors may implement the {@link
+ * org.springframework.core.Ordered} interface to be able to specify a sorting
+ * order (and thus a priority) for getting applied by the {@code DispatcherServlet}.
+ * Non-Ordered instances get treated as lowest priority.
+ *
+ * @author Rod Johnson
+ * @author Juergen Hoeller
+ * @see org.springframework.web.servlet.mvc.SimpleControllerHandlerAdapter
+ * @see org.springframework.web.servlet.handler.SimpleServletHandlerAdapter
+ */
+public interface HandlerAdapter {
+
+	/**
+	 * Given a handler instance, return whether or not this {@code HandlerAdapter}
+	 * can support it. Typical HandlerAdapters will base the decision on the handler
+	 * type. HandlerAdapters will usually only support one handler type each.
+	 * <p>A typical implementation:
+	 * <p>{@code
+	 * return (handler instanceof MyHandler);
+	 * }
+	 * @param handler handler object to check
+	 * @return whether or not this object can use the given handler
+	 */
+	boolean supports(Object handler);
+
+	/**
+	 * Use the given handler to handle this request.
+	 * The workflow that is required may vary widely.
+	 * @param request current HTTP request
+	 * @param response current HTTP response
+	 * @param handler handler to use. This object must have previously been passed
+	 * to the {@code supports} method of this interface, which must have
+	 * returned {@code true}.
+	 * @throws Exception in case of errors
+	 * @return a ModelAndView object with the name of the view and the required
+	 * model data, or {@code null} if the request has been handled directly
+	 */
+	@Nullable
+	ModelAndView handle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception;
+
+	/**
+	 * Same contract as for HttpServlet's {@code getLastModified} method.
+	 * Can simply return -1 if there's no support in the handler class.
+	 * @param request current HTTP request
+	 * @param handler handler to use
+	 * @return the lastModified value for the given handler
+	 * @see javax.servlet.http.HttpServlet#getLastModified
+	 * @see org.springframework.web.servlet.mvc.LastModified#getLastModified
+	 */
+	long getLastModified(HttpServletRequest request, Object handler);
+
+}
+```
+
+
+
+##### MethodParameter
+
+```java
+/**
+ * Helper class that encapsulates the specification of a method parameter, i.e. a {@link Method}
+ * or {@link Constructor} plus a parameter index and a nested type index for a declared generic
+ * type. Useful as a specification object to pass along.
+ *
+ * <p>As of 4.2, there is a {@link org.springframework.core.annotation.SynthesizingMethodParameter}
+ * subclass available which synthesizes annotations with attribute aliases. That subclass is used
+ * for web and message endpoint processing, in particular.
+ *
+ * @see org.springframework.core.annotation.SynthesizingMethodParameter
+ */
+public class MethodParameter {
+  // ...  
+}
+```
+
+
+
+##### HandlerMethodArgumentResolver
+
+
+
+##### HandlerMethodArgumentResolverComposite
+
+
+
+##### RequestResponseBodyMethodProcessor
